@@ -1,35 +1,50 @@
 import socket
-import select
+import pickle
 
 class Slave:
-    def __init__(self, MASTERIP, MASTERPORT):
-        # Socket setup
-        self.HEADER_LENGTH = 10
-        self.MASTERIP = MASTERIP
-        self.MASTERPORT = MASTERPORT
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket
-        self.socket.connect((self.IP, self.PORT))
-        self.socket.setblocking(False)
+    def __init__(self, masterHost, masterPort):
+        # For connection with master
+        self.masterHost = masterHost
+        self.masterPort = masterPort
+        self.socket = None
 
-        # K-means parameters
-        self.centroids = []
-        self.data = []
-        self.centroid_assignments = {}
+    def receiveTask(self):
+        try:
+            data = self.socket.recv(1024)
+            if not data:
+                return None, None, None, None
+            scatteredData, broadcastedData, task, kwargs = pickle.loads(data)
+            return scatteredData, broadcastedData, task, kwargs
+        except EOFError:
+            return None, None, None, None
+        except Exception as e:
+            print(f"Error receiving task: {e}")
+            return None, None, None, None
 
-    def receiveData(self):
-        # Receive data from master
-        pass
+        #scatteredData, broadcastedData, task, kwargs = pickle.loads(self.socket.recv(1024))
+        #return scatteredData, broadcastedData, task, kwargs
 
-    def receiveCentroids(self):
-        # Receive centroids from master
-        pass
-    
-    def assignCentroids(self):
-        # Assign data points to the closest centroid
+    def executeTask(self, scatteredData, broadcastedData, task, kwargs):
+        if task is not None:
+            result = task(scatteredData, broadcastedData, **kwargs)
+            return result
+        else:
+            return None
 
-        # Send assignments to master
-        pass
+    def sendResults(self, result):
+        self.socket.send(pickle.dumps(result))
 
-    def sendCentroidAssignments(self):
-        # Send centroid assignments to master
-        pass
+    def initialize(self):
+        # Initialize connection with master
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect((self.masterHost, self.masterPort))
+
+    def run(self):
+        while True:
+            scatteredData, broadcastedData, task, kwargs = self.receiveTask()
+            if task is None and scatteredData is None and broadcastedData is None:
+                break
+            result = self.executeTask(scatteredData, broadcastedData, task, kwargs)
+            self.sendResults(result)
+
+        self.socket.close()
