@@ -1,65 +1,78 @@
 import socket
-import select
+import pickle #to convert data to bytes
 
+# Clase Master
 class Master:
-    def __init__(self, IP, PORT, k, max_iter, dataset):
-        # Socket setup
-        self.HEADER_LENGTH = 10
-        self.IP = IP
-        self.PORT = PORT
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # TCP socket
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) #To reuse the same port
-        self.socket.bind((self.IP, self.PORT))
-        self.socket.listen()
+    def __init__(self, host, port, numSlaves):
+        # For port config
+        self.host = host
+        self.port = port
 
-        # K-means parameters
-        self.k = k
-        self.max_iter = max_iter
-        self.dataset = dataset
-        self.centroids = []
-        self.clusters = {}
+        # For slave management
+        self.numSlaves = numSlaves
+        self.slaves = []
+        self.slavesData = [] # data to be sent to slaves
+        self.results = [] # results from slaves
 
-        # Slaves data
-        self.slaves = [self.socket]
-        self.centroidsAssignments = {}
+    def connections(self):
+        # Connection configuration for master and slaves
 
+        # Master socket config
+        masterSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        masterSocket.bind((self.host, self.port))
+        masterSocket.listen(self.numSlaves)
 
-    def splitData(self):
-        # Split data equally for all slaves
+        # Accept connections from slaves
+        for _ in range(self.numSlaves):
+            slaveSocket, addr = masterSocket.accept()
+            self.slaves.append(slaveSocket)
+            print(f"New slave connected from {addr}")
 
-        # Send data to slaves
-        pass
+    def scatter(self, data):
+        # Splits data into pieces and adds them to slavesData
 
-    def sendData(self, slave_socket, data):
-        # Send data to a slave
-        pass
+        size = len(data) // self.numSlaves
+        for i in range(self.numSlaves):
+            start = i * size
+            if i == self.numSlaves - 1:
+                # The last slave will receive all the remaining data
+                end = len(data)
+            else:
+                end = start + size
+            slaveData = data[start:end]
+            self.slavesData.append(slaveData)
 
-    def initCentroids(self):
-        # Initialize centroids randomly
-        pass
+    def sendTaskToSlave(self, slave, scatteredData, broadcastedData, task, kwargs):
+        # task is a function that has to be executed by the slave
+        # kwargs are the arguments of task
+        # scatteredData is the portion of data scattered to the slave
+        # broadcastedData is the data that has to be sent to all slaves
 
-    def broadcastCentroids(self):
-        # Broadcast centroids to all slaves
-        pass
+        completeTask = (scatteredData, broadcastedData, task, kwargs)
+        slave.send(pickle.dumps(completeTask))
+        
 
-    def receiveCentroidAssigments(self, slave_socket):
-        # Receive centroids from a slave
-        pass
-    
-    def updateCentroids(self):
-        # Receive centroid assignments from all slaves
+    def receiveResults(self):
+        # Receives the results from the slaves
 
-        # Update centroids based on assignments from slaves
-        pass
+        for slave in self.slaves:
+            result = pickle.loads(slave.recv(1024))
+            if result is not None:
+                self.results.append(result)
 
-    def run(self):
-        # Split data among slaves
+    def initialize(self):
+        # Initializes the master connection
+        self.connections()
 
-        # Initialize centroids
+    def runSlaves(self, scatterData, broadcastData, task, **kwargs):
+        # scatterData is the data that has to be splitted and sent to the slaves
+        # broadcastData is the data that has to be sent to all slaves
+        self.scatter(scatterData)
+        for i in range(len(self.slaves)):    
+            self.sendTaskToSlave(self.slaves[i], self.slavesData[i], broadcastData, task, kwargs)
 
-        # Send centroids to all slaves
-
-        # Update centroids
-        pass
-
-    
+        for slave in self.slaves:
+            slave.sendall(pickle.dumps((None, None, None, None)))
+            
+        self.receiveResults()
+        return self.results
