@@ -1,78 +1,75 @@
 import socket
-import pickle #to convert data to bytes
+import pickle
+import numpy as np
 
-# Clase Master
 class Master:
     def __init__(self, host, port, numSlaves):
-        # For port config
         self.host = host
         self.port = port
-
-        # For slave management
         self.numSlaves = numSlaves
         self.slaves = []
-        self.slavesData = [] # data to be sent to slaves
-        self.results = [] # results from slaves
+        self.slavesData = []
+        self.results = []
 
     def connections(self):
-        # Connection configuration for master and slaves
-
-        # Master socket config
         masterSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         masterSocket.bind((self.host, self.port))
         masterSocket.listen(self.numSlaves)
 
-        # Accept connections from slaves
         for _ in range(self.numSlaves):
             slaveSocket, addr = masterSocket.accept()
             self.slaves.append(slaveSocket)
             print(f"New slave connected from {addr}")
 
     def scatter(self, data):
-        # Splits data into pieces and adds them to slavesData
-
         size = len(data) // self.numSlaves
         for i in range(self.numSlaves):
             start = i * size
-            if i == self.numSlaves - 1:
-                # The last slave will receive all the remaining data
-                end = len(data)
-            else:
-                end = start + size
+            end = len(data) if i == self.numSlaves - 1 else start + size
             slaveData = data[start:end]
             self.slavesData.append(slaveData)
 
     def sendTaskToSlave(self, slave, scatteredData, broadcastedData, task, kwargs):
-        # task is a function that has to be executed by the slave
-        # kwargs are the arguments of task
-        # scatteredData is the portion of data scattered to the slave
-        # broadcastedData is the data that has to be sent to all slaves
-
-        completeTask = (scatteredData, broadcastedData, task, kwargs)
-        slave.send(pickle.dumps(completeTask))
-        
+        try:
+            completeTask = (scatteredData, broadcastedData, task, kwargs)
+            slave.sendall(pickle.dumps(completeTask))
+        except Exception as e:
+            print(f"Error sending task to slave: {e}")
 
     def receiveResults(self):
-        # Receives the results from the slaves
-
+        self.results = []
         for slave in self.slaves:
-            result = pickle.loads(slave.recv(1024))
-            if result is not None:
-                self.results.append(result)
+            try:
+                result = pickle.loads(slave.recv(524288000))
+                if result is not None:
+                    self.results.append(result)
+            except Exception as e:
+                print(f"Error receiving result from slave: {e}")
+        
+        self.results = [item.item() for sublist in self.results for item in sublist]
 
     def initialize(self):
-        # Initializes the master connection
         self.connections()
 
-    def runSlaves(self, scatterData, broadcastData, task, **kwargs):
-        # scatterData is the data that has to be splitted and sent to the slaves
-        # broadcastData is the data that has to be sent to all slaves
+    def runSlaves(self, scatterData, broadcastData, task, kwargs):
         self.scatter(scatterData)
-        for i in range(len(self.slaves)):    
+        for i in range(len(self.slaves)):
             self.sendTaskToSlave(self.slaves[i], self.slavesData[i], broadcastData, task, kwargs)
 
-        for slave in self.slaves:
-            slave.sendall(pickle.dumps((None, None, None, None)))
-            
+        # for slave in self.slaves:
+        #     try:
+        #         slave.sendall(pickle.dumps((None, None, None, None)))
+        #     except Exception as e:
+        #         print(f"Error sending termination signal to slave: {e}")
+
         self.receiveResults()
+        print("Recibiendo resultados de esclavo")
         return self.results
+
+    def close_connections(self):
+        for slave in self.slaves:
+            try:
+                slave.close()
+            except Exception as e:
+                print(f"Error closing connection to slave: {e}")
+        print("All slave connections closed.")

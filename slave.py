@@ -10,7 +10,7 @@ class Slave:
 
     def receiveTask(self):
         try:
-            data = self.socket.recv(1024)
+            data = self.socket.recv(524288000)
             if not data:
                 return None, None, None, None
             scatteredData, broadcastedData, task, kwargs = pickle.loads(data)
@@ -20,13 +20,12 @@ class Slave:
         except Exception as e:
             print(f"Error receiving task: {e}")
             return None, None, None, None
-
         #scatteredData, broadcastedData, task, kwargs = pickle.loads(self.socket.recv(1024))
         #return scatteredData, broadcastedData, task, kwargs
 
     def executeTask(self, scatteredData, broadcastedData, task, kwargs):
         if task is not None:
-            result = task(scatteredData, broadcastedData, **kwargs)
+            result = task(scatteredData, broadcastedData, kwargs)
             return result
         else:
             return None
@@ -37,6 +36,7 @@ class Slave:
     def initialize(self):
         # Initialize connection with master
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.connect((self.masterHost, self.masterPort))
 
     def run(self):
